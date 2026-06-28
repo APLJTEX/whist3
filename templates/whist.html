@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+
+{% block head %}
+    <!-- 如果 base.html 没有引入，这里需要引入 CSS -->
+    <link rel="stylesheet" href="{{ url_for('static', filename='whist.css') }}">
+{% endblock %}
+
+{% block main_content %}
+<div class="whist-table">
+    <!-- West Area -->
+    <div class="west">
+        <h2 class="player-label">West</h2>
+        <div class="west-hand">
+            {% for _ in game_state.hands.west %}
+                <img class="card" src="{{ url_for('static', filename='back.png') }}" alt="Card Back">
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- North & Central Pool Area -->
+    <div class="nc-area">
+        <div class="north">
+            <h2 class="player-label">North</h2>
+            <div class="north-hand">
+                {% for card in game_state.hands.north %}
+                    <img class="card" src="{{ url_for('static', filename='back.png') }}" alt="Card Back">
+                {% endfor %}
+            </div>
+        </div>
+
+        <!-- Central Pool -->
+        <div class="central-pool">
+            <!-- Top Left Score -->
+            <div class="info-top-left">
+                <div class="score-label">East-West</div>
+                <div class="score-number">{{ game_state.scores.east_west }}</div>
+            </div>
+
+            <!-- Top Right Score -->
+            <div class="info-top-right">
+                <div class="score-label">South-North</div>
+                <div class="score-number">{{ game_state.scores.south_north }}</div>
+            </div>
+
+            <!-- Current Trick Cards -->
+            <div class="trick-north">
+                {% if game_state.current_trick and game_state.current_trick|length > 0 %}
+                    {% set north_card = game_state.current_trick[0] %}
+                    {% if north_card[0] == 'north' %}
+                        <img class="trick-card" src="{{ url_for('static', filename=north_card[1] + '.png') }}" alt="{{ north_card[1] }}">
+                    {% endif %}
+                {% endif %}
+            </div>
+            <div class="trick-east">
+                {% if game_state.current_trick and game_state.current_trick|length > 1 %}
+                    {% set east_card = game_state.current_trick[1] %}
+                    {% if east_card[0] == 'east' %}
+                        <img class="trick-card" src="{{ url_for('static', filename=east_card[1] + '.png') }}" alt="{{ east_card[1] }}">
+                    {% endif %}
+                {% endif %}
+            </div>
+            <div class="trick-south">
+                {% if game_state.current_trick and game_state.current_trick|length > 2 %}
+                    {% set south_card = game_state.current_trick[2] %}
+                    {% if south_card[0] == 'south' %}
+                        <img class="trick-card" src="{{ url_for('static', filename=south_card[1] + '.png') }}" alt="{{ south_card[1] }}">
+                    {% endif %}
+                {% endif %}
+            </div>
+            <div class="trick-west">
+                {% if game_state.current_trick and game_state.current_trick|length > 3 %}
+                    {% set west_card = game_state.current_trick[3] %}
+                    {% if west_card[0] == 'west' %}
+                        <img class="trick-card" src="{{ url_for('static', filename=west_card[1] + '.png') }}" alt="{{ west_card[1] }}">
+                    {% endif %}
+                {% endif %}
+            </div>
+
+            <!-- Center Message -->
+            <div class="center-area">
+                {% if game_state.message %}
+                <div class="trick-message {{ game_state.message_class }}">{{ game_state.message }}</div>
+                {% endif %}
+            </div>
+
+            <!-- Bottom Left - Trump Suit -->
+            <div class="trump-area">
+                <div>Trump</div>
+                {% if game_state.trump_suit %}
+                <img class="trump-svg" src="{{ url_for('static', filename=game_state.trump_suit + '.svg') }}" alt="{{ game_state.trump_suit }}">
+                {% endif %}
+            </div>
+
+            <!-- Bottom Right - Trick Counter -->
+            <div class="info-bottom-right">
+                Trick {{ (game_state.scores.south_north + game_state.scores.east_west) + (1 if game_state.stop_type not in ['game_over', 'new_trick'] else 0) }} / 13
+            </div>
+        </div>
+    </div>
+
+    <!-- East Area -->
+    <div class="east">
+        <h2 class="player-label">East</h2>
+        <div class="east-hand">
+            {% for _ in game_state.hands.east %}
+                <img class="card" src="{{ url_for('static', filename='back.png') }}" alt="Card Back">
+            {% endfor %}
+        </div>
+    </div>
+
+    <!-- South Area -->
+    <div class="south">
+        <h2 class="player-label">South</h2>
+        <div id="south-hand" class="south-hand">
+            <!-- South's cards will be rendered by whist.js -->
+        </div>
+    </div>
+</div>
+
+<!-- Proceed Button -->
+<button id="proceed-btn" class="proceed-btn" disabled>Proceed</button>
+
+<!-- Pass game state to JavaScript -->
+<script>
+    window.gameState = {{ game_state | tojson }};
+</script>
+<script src="{{ url_for('static', filename='whist.js') }}"></script>
+{% endblock %}
