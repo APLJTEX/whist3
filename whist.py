@@ -11,14 +11,17 @@ def find_valid_cards(hand, lead_suit):
 
 def sort_hand(hand):
     """对一手牌进行排序：先按花色(♣, ♢, ♡, ♠)，再按点数(A, K, Q, J, 10...)"""
-    # 定义花色和点数的排序优先级
+    # 定义花色排序优先级
     suit_order = {'C': 0, 'D': 1, 'H': 2, 'S': 3}  # Clubs, Diamonds, Hearts, Spades
-    rank_order = {'A': 14, 'K': 13, 'Q': 12, 'J': 11, '10': 10, '9': 9, '8': 8, '7': 7, 
-                 '6': 6, '5': 5, '4': 4, '3': 3, '2': 2}
+    
+    # 正确的点数排序（基于get_rank_ace_high返回的数值）
+    # 注意：get_rank_ace_high返回的是数值，A=14, K=13, Q=12, J=11, 10=10...
+    # 所以我们直接使用这个数值作为排序依据
     
     # 按花色和点数排序
     return sorted(hand, key=lambda card: (suit_order[get_suit(card)], 
-                                        rank_order[get_rank_ace_high(card)]))
+                                        -get_rank_ace_high(card)))
+    # 使用负号是因为get_rank_ace_high中A=14（最大），但我们希望A排在最前，所以取负后A变成-14（最小）
 
 
 def find_highest_card(cards, trump_suit=None, lead_suit=None):
@@ -290,11 +293,23 @@ def game_update(session, action):
         next_next_player = players[(players.index(next_player) + 1) % 4]
         if next_next_player == 'south':
             game_state['stop_type'] = 'follow_card' if current_trick else 'lead_card'
+            game_state['button_config'] = {
+                'text': 'Proceed',
+                'id': 'proceed-btn',
+                'class': 'proceed-btn',
+                'disabled': False
+            }
         else:
-            # AI玩家需要自动出牌 - 递归调用game_update
+            # 修复：避免递归调用，改为循环处理AI出牌
+            # 保存当前状态，返回给前端，让前端自动触发下一次请求
             game_state['stop_type'] = 'proceed'
-            # 递归调用game_update处理下一个AI玩家的出牌
-            return game_update(session, None)
+            game_state['button_config'] = {
+                'text': 'Proceed',
+                'id': 'proceed-btn',
+                'class': 'proceed-btn',
+                'disabled': True
+            }
+            # 前端将自动触发下一次请求，无需递归
 
     # 更新手牌
     game_state['hands'] = {
