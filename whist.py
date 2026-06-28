@@ -19,6 +19,43 @@ def sort_hand(hand):
                                         -get_rank_ace_high(card)))
 
 
+def get_card_display_name(card):
+    """将内部牌表示转换为人类可读的名称"""
+    rank = get_rank_ace_high(card)
+    suit = get_suit(card)
+    
+    # 转换点数
+    rank_names = {
+        '14': 'Ace',
+        '13': 'King',
+        '12': 'Queen',
+        '11': 'Jack',
+        '10': '10',
+        '9': '9',
+        '8': '8',
+        '7': '7',
+        '6': '6',
+        '5': '5',
+        '4': '4',
+        '3': '3',
+        '2': '2'
+    }
+    
+    # 转换花色
+    suit_names = {
+        'C': 'Clubs',
+        'D': 'Diamonds',
+        'H': 'Hearts',
+        'S': 'Spades'
+    }
+    
+    # 获取可读名称
+    rank_name = rank_names.get(str(rank), str(rank))
+    suit_name = suit_names.get(suit, suit)
+    
+    return f"{rank_name} of {suit_name}"
+
+
 def find_highest_card(cards, trump_suit=None, lead_suit=None):
     """
     找出一组牌中的最高牌。
@@ -195,7 +232,10 @@ def game_update(session, action):
     if not game_state:
         return new_game(session)
 
-    players = ['north', 'east', 'south', 'west']
+    # ====== 关键修正：使用逆时针出牌顺序 ======
+    # 逆时针顺序：North → West → South → East
+    players = ['north', 'west', 'south', 'east']
+    
     current_trick = game_state.get('current_trick', [])
     hands = game_state['hands']
     trump_suit = game_state['trump_suit']
@@ -208,10 +248,10 @@ def game_update(session, action):
         game_state['leader'] = 'north'  # 北家首攻
         game_state['message'] = "New trick started. North leads."
         
-        # ====== 关键修复：初始化出牌历史 ======
-        game_state['trick_history'] = []  # 清空历史记录
+        # 清空历史记录
+        game_state['trick_history'] = []
         
-        # ====== 关键修复：自动触发北家出牌 ======
+        # 直接触发自动出牌
         game_state['stop_type'] = 'auto_play'
         session['game_state'] = game_state
         return game_update(session, None)  # 直接触发自动出牌
@@ -222,7 +262,7 @@ def game_update(session, action):
         next_player_index = len(current_trick)
         next_player = players[(players.index(leader) + next_player_index) % 4]
         
-        # ====== 关键修复：确保出牌信息正确存储 ======
+        # ====== 关键修正：确保出牌信息正确存储 ======
         # 如果是AI玩家的回合，自动出牌
         if next_player != 'south':
             # AI出牌
@@ -230,18 +270,21 @@ def game_update(session, action):
             hands[next_player].remove(ai_card)
             hands[next_player] = sort_hand(hands[next_player])
             
-            # ====== 关键修复：正确添加出牌信息 ======
+            # ====== 关键修正：正确添加出牌信息 ======
             current_trick.append((next_player, ai_card))
             game_state['current_trick'] = current_trick
             
-            # ====== 关键修复：更新出牌历史 ======
+            # ====== 关键修正：更新出牌历史 ======
             game_state['trick_history'].append({
                 'player': next_player,
                 'card': ai_card,
-                'position': next_player_index
+                'position': next_player_index,
+                'display_name': get_card_display_name(ai_card)  # 使用可读名称
             })
             
-            game_state['message'] = f"{next_player.capitalize()} played {ai_card}."
+            # ====== 关键修正：显示人类可读的出牌信息 ======
+            display_name = get_card_display_name(ai_card)
+            game_state['message'] = f"{next_player.capitalize()} played {display_name}."
             
             # 检查是否完成一墩
             if len(current_trick) == 4:
@@ -317,14 +360,16 @@ def game_update(session, action):
         current_trick.append(('south', played_card))
         game_state['current_trick'] = current_trick
         
-        # ====== 关键修复：更新出牌历史 ======
+        # ====== 关键修正：更新出牌历史 ======
+        display_name = get_card_display_name(played_card)
         game_state['trick_history'].append({
             'player': 'south',
             'card': played_card,
-            'position': len(current_trick) - 1
+            'position': len(current_trick) - 1,
+            'display_name': display_name
         })
         
-        game_state['message'] = f"You played {played_card}."
+        game_state['message'] = f"You played {display_name}."
 
         # 检查是否完成一墩
         if len(current_trick) == 4:
