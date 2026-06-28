@@ -14,14 +14,9 @@ def sort_hand(hand):
     # 定义花色排序优先级
     suit_order = {'C': 0, 'D': 1, 'H': 2, 'S': 3}  # Clubs, Diamonds, Hearts, Spades
     
-    # 正确的点数排序（基于get_rank_ace_high返回的数值）
-    # 注意：get_rank_ace_high返回的是数值，A=14, K=13, Q=12, J=11, 10=10...
-    # 所以我们直接使用这个数值作为排序依据
-    
     # 按花色和点数排序
     return sorted(hand, key=lambda card: (suit_order[get_suit(card)], 
                                         -get_rank_ace_high(card)))
-    # 使用负号是因为get_rank_ace_high中A=14（最大），但我们希望A排在最前，所以取负后A变成-14（最小）
 
 
 def find_highest_card(cards, trump_suit=None, lead_suit=None):
@@ -132,22 +127,19 @@ def new_game(session):
     deck = make_deck()
     random.shuffle(deck)
 
-    # ====== 修正：按顺时针顺序发牌，确保最后一张给西家 ======
     # 发牌顺序：北 → 东 → 南 → 西 （顺时针）
-    # 每人13张，共52张
     hands = {
-        'north': deck[0:13],    # 第1-13张
-        'east': deck[13:26],    # 第14-26张
-        'south': deck[26:39],   # 第27-39张
-        'west': deck[39:52]     # 第40-52张
+        'north': deck[0:13],
+        'east': deck[13:26],
+        'south': deck[26:39],
+        'west': deck[39:52]
     }
 
-    # ====== 关键：最后一张牌（索引51，第52张）发给西家 ======
-    # 根据规则，这张牌翻开作为王牌
-    trump_card = deck[51]  # 最后一张牌
-    trump_suit = get_suit(trump_card)  # 王牌花色
+    # 最后一张牌作为王牌
+    trump_card = deck[51]
+    trump_suit = get_suit(trump_card)
     
-    # 王牌花色映射到SVG文件名和显示名称
+    # 王牌花色映射
     trump_svg_map = {
         'S': {'svg': 'spade', 'name': 'Spade', 'symbol': '♠'},
         'H': {'svg': 'heart', 'name': 'Heart', 'symbol': '♥'},
@@ -164,7 +156,7 @@ def new_game(session):
         'west': 'West (AI)'
     }
     
-    # 游戏开始消息（显示王牌花色）
+    # 游戏开始消息
     suit_names = {'S': 'Spades', 'H': 'Hearts', 'D': 'Diamonds', 'C': 'Clubs'}
     game_message = f"Trump suit is {suit_names.get(trump_suit, trump_suit)}! Ready for a new trick!"
 
@@ -177,22 +169,19 @@ def new_game(session):
     }
 
     game_state = {
-        # ====== 标准游戏状态 ======
-        'hands': sorted_hands,  # 使用排序后的手牌
-        'trump_suit': trump_suit,  # 王牌花色代码
-        'trump_card': trump_card,  # 王牌牌面（用于显示）
+        'hands': sorted_hands,
+        'trump_suit': trump_suit,
+        'trump_card': trump_card,
         'scores': {'south_north': 0, 'east_west': 0},
-        'tricks': [],  # 已完成的墩列表
-        'current_trick': [],  # 当前正在打的墩（出牌列表）
+        'tricks': [],
+        'current_trick': [],
         'leader': 'north',  # 首攻者是北家
-        'players': players,  # 玩家显示名称
-        
-        # ====== 前端模板需要的数据 ======
-        'trump_suit_name': trump_info['svg'],  # 用于加载正确的SVG文件
-        'message': game_message,  # 显示王牌花色
+        'players': players,
+        'trump_suit_name': trump_info['svg'],
+        'message': game_message,
         'message_class': "info-message",
-        'stop_type': 'new_trick',  # 让按钮显示"New Trick"
-        'trick_number': 1,  # 当前第几墩
+        'stop_type': 'new_trick',
+        'trick_number': 1,
     }
 
     session['game_state'] = game_state
@@ -217,7 +206,15 @@ def game_update(session, action):
         game_state['current_trick'] = []
         game_state['leader'] = 'north'  # 北家首攻
         game_state['message'] = "New trick started. North leads."
-        game_state['stop_type'] = 'lead_card'  # 北家需要出牌
+        
+        # ====== 关键修复：检查首攻者是否是AI ======
+        if leader == 'north':
+            # 北家是AI，自动出牌
+            game_state['stop_type'] = 'auto_play'
+        else:
+            # 人类玩家首攻
+            game_state['stop_type'] = 'lead_card'
+            
         session['game_state'] = game_state
         return game_state
 
@@ -226,8 +223,70 @@ def game_update(session, action):
     next_player_index = len(current_trick)
     next_player = players[(players.index(leader) + next_player_index) % 4]
 
-    # --- 人类玩家 ---
-    if next_player == 'south':
+    # ====== 关键修复：自动处理AI出牌 ======
+    # 如果是AI玩家的回合，自动出牌
+    if next_player != 'south':
+        # AI出牌
+        ai_card = ai_play_card(next_player, hands[next_player], current_trick, trump_suit, game_state)
+        hands[next_player].remove(ai_card)
+        hands[next_player] = sort_hand(hands[next_player])
+        current_trick.append((next_player, ai_card))
+        game_state['message'] = f"{next_player.capitalize()} played {ai_card}."
+        
+        # 检查是否完成一墩
+        if len(current_trick) == 4:
+            winner = determine_trick_winner(current_trick, trump_suit)
+            # 更新分数
+            if winner in ['south', 'north']:
+                game_state['scores']['south_north'] += 1
+            else:
+                game_state['scores']['east_west'] += 1
+
+            # 保存此墩
+            trick_dict = {}
+            for player, card in current_trick:
+                trick_dict[player] = card
+            game_state['tricks'].append(trick_dict)
+            game_state['current_trick'] = []
+            game_state['leader'] = winner
+            game_state['trick_number'] = len(game_state['tricks']) + 1
+
+            # 检查游戏是否结束
+            if len(game_state['tricks']) == 13:
+                sn_score = game_state['scores']['south_north']
+                ew_score = game_state['scores']['east_west']
+                if sn_score >= 7:
+                    game_state['message'] = f"South-North wins the game! Final score: {sn_score}-{ew_score}"
+                else:
+                    game_state['message'] = f"East-West wins the game! Final score: {ew_score}-{sn_score}"
+                game_state['stop_type'] = 'game_over'
+            else:
+                game_state['message'] = f"{winner.capitalize()} wins the trick! They will lead the next one."
+                game_state['stop_type'] = 'new_trick'
+        else:
+            # 墩未完成，继续
+            game_state['current_trick'] = current_trick
+            # 判断下一个玩家是谁
+            next_next_player = players[(players.index(next_player) + 1) % 4]
+            if next_next_player == 'south':
+                game_state['stop_type'] = 'follow_card'
+            else:
+                # 下一个玩家还是AI，继续自动出牌
+                game_state['stop_type'] = 'auto_play'
+        
+        # 更新手牌
+        game_state['hands'] = {
+            'north': hands['north'],
+            'east': hands['east'],
+            'south': hands['south'],
+            'west': hands['west']
+        }
+        
+        session['game_state'] = game_state
+        return game_state
+
+    # --- 人类玩家出牌 ---
+    else:
         played_card = action
         # 验证出牌是否合法
         lead_suit = get_suit(current_trick[0][1]) if current_trick else None
@@ -240,84 +299,58 @@ def game_update(session, action):
 
         # 从手牌中移除这张牌并加入当前墩
         hands['south'].remove(played_card)
-        # 对剩余手牌重新排序
         hands['south'] = sort_hand(hands['south'])
         current_trick.append(('south', played_card))
         game_state['message'] = f"You played {played_card}."
 
-    # --- AI玩家 ---
-    else:
-        ai_card = ai_play_card(next_player, hands[next_player], current_trick, trump_suit, game_state)
-        hands[next_player].remove(ai_card)
-        # 对剩余手牌重新排序
-        hands[next_player] = sort_hand(hands[next_player])
-        current_trick.append((next_player, ai_card))
-        game_state['message'] = f"{next_player.capitalize()} played {ai_card}."
-
-    # --- 检查是否完成一墩 ---
-    if len(current_trick) == 4:
-        winner = determine_trick_winner(current_trick, trump_suit)
-        # 更新分数
-        if winner in ['south', 'north']:
-            game_state['scores']['south_north'] += 1
-        else:
-            game_state['scores']['east_west'] += 1
-
-        # 保存此墩，并重置下一墩
-        # 将当前墩转换为字典格式，供模板显示
-        trick_dict = {}
-        for player, card in current_trick:
-            trick_dict[player] = card
-        
-        game_state['tricks'].append(trick_dict)
-        game_state['current_trick'] = []
-        game_state['leader'] = winner  # 赢家领出下一墩
-        game_state['trick_number'] = len(game_state['tricks']) + 1
-
-        # 检查游戏是否结束
-        if len(game_state['tricks']) == 13:
-            sn_score = game_state['scores']['south_north']
-            ew_score = game_state['scores']['east_west']
-            if sn_score >= 7:
-                game_state['message'] = f"South-North wins the game! Final score: {sn_score}-{ew_score}"
+        # 检查是否完成一墩
+        if len(current_trick) == 4:
+            winner = determine_trick_winner(current_trick, trump_suit)
+            # 更新分数
+            if winner in ['south', 'north']:
+                game_state['scores']['south_north'] += 1
             else:
-                game_state['message'] = f"East-West wins the game! Final score: {ew_score}-{sn_score}"
-            game_state['stop_type'] = 'game_over'
-        else:
-            game_state['message'] = f"{winner.capitalize()} wins the trick! They will lead the next one."
-            game_state['stop_type'] = 'new_trick'
-    else:
-        # 墩未完成，继续
-        game_state['current_trick'] = current_trick
-        # 判断下一个玩家是谁
-        next_next_player = players[(players.index(next_player) + 1) % 4]
-        if next_next_player == 'south':
-            game_state['stop_type'] = 'follow_card' if current_trick else 'lead_card'
-            game_state['button_config'] = {
-                'text': 'Proceed',
-                'id': 'proceed-btn',
-                'class': 'proceed-btn',
-                'disabled': False
-            }
-        else:
-            # 修复：避免递归调用，改为循环处理AI出牌
-            # 保存当前状态，返回给前端，让前端自动触发下一次请求
-            game_state['stop_type'] = 'proceed'
-            game_state['button_config'] = {
-                'text': 'Proceed',
-                'id': 'proceed-btn',
-                'class': 'proceed-btn',
-                'disabled': True
-            }
-            # 前端将自动触发下一次请求，无需递归
+                game_state['scores']['east_west'] += 1
 
-    # 更新手牌
-    game_state['hands'] = {
-        'north': hands['north'],
-        'east': hands['east'],
-        'south': hands['south'],
-        'west': hands['west']
-    }
+            # 保存此墩
+            trick_dict = {}
+            for player, card in current_trick:
+                trick_dict[player] = card
+            game_state['tricks'].append(trick_dict)
+            game_state['current_trick'] = []
+            game_state['leader'] = winner
+            game_state['trick_number'] = len(game_state['tricks']) + 1
 
-    session['game_state'] = game_state
-    return game_state
+            # 检查游戏是否结束
+            if len(game_state['tricks']) == 13:
+                sn_score = game_state['scores']['south_north']
+                ew_score = game_state['scores']['east_west']
+                if sn_score >= 7:
+                    game_state['message'] = f"South-North wins the game! Final score: {sn_score}-{ew_score}"
+                else:
+                    game_state['message'] = f"East-West wins the game! Final score: {ew_score}-{sn_score}"
+                game_state['stop_type'] = 'game_over'
+            else:
+                game_state['message'] = f"{winner.capitalize()} wins the trick! They will lead the next one."
+                game_state['stop_type'] = 'new_trick'
+        else:
+            # 墩未完成，继续
+            game_state['current_trick'] = current_trick
+            # 判断下一个玩家是谁
+            next_next_player = players[(players.index(next_player) + 1) % 4]
+            if next_next_player == 'south':
+                game_state['stop_type'] = 'follow_card'
+            else:
+                # 下一个玩家是AI，继续自动出牌
+                game_state['stop_type'] = 'auto_play'
+
+        # 更新手牌
+        game_state['hands'] = {
+            'north': hands['north'],
+            'east': hands['east'],
+            'south': hands['south'],
+            'west': hands['west']
+        }
+        
+        session['game_state'] = game_state
+        return game_state
