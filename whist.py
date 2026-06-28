@@ -226,58 +226,6 @@ def new_game(session):
     return game_state
 
 
-def force_north_lead(session):
-    """强制执行North首攻，确保North出牌一定会显示"""
-    game_state = session.get('game_state')
-    if not game_state:
-        return new_game(session)
-    
-    # 确保是新墩开始
-    if game_state.get('stop_type') != 'new_trick':
-        return game_state
-    
-    # 强制设置North为首攻
-    game_state['leader'] = 'north'
-    game_state['message'] = "New trick started. North leads."
-    
-    # 直接执行North出牌
-    hands = game_state['hands']
-    trump_suit = game_state['trump_suit']
-    current_trick = []
-    
-    # North AI出牌
-    north_card = ai_play_card('north', hands['north'], current_trick, trump_suit, game_state)
-    hands['north'].remove(north_card)
-    hands['north'] = sort_hand(hands['north'])
-    
-    # 更新当前墩
-    current_trick.append(('north', north_card))
-    game_state['current_trick'] = current_trick
-    
-    # 更新出牌历史
-    display_name = get_card_display_name(north_card)
-    game_state['trick_history'] = [{
-        'player': 'north',
-        'card': north_card,
-        'display_position': 0,  # North在顶部
-        'display_name': display_name
-    }]
-    
-    game_state['message'] = f"North played {display_name}."
-    game_state['stop_type'] = 'wait_for_next_player'
-    
-    # 更新手牌
-    game_state['hands'] = {
-        'north': hands['north'],
-        'east': hands['east'],
-        'south': hands['south'],
-        'west': hands['west']
-    }
-    
-    session['game_state'] = game_state
-    return game_state
-
-
 def game_update(session, action):
     """处理游戏中的每一个动作。"""
     game_state = session.get('game_state')
@@ -293,105 +241,64 @@ def game_update(session, action):
     trump_suit = game_state['trump_suit']
     leader = game_state['leader']
 
-    # --- 处理"New Trick"动作 - 使用强制执行方式 ---
+    # --- 处理"New Trick"动作 - 使用最小化修复方案 ---
     if action == 'new_trick':
-        # 直接调用强制North首攻函数
-        return force_north_lead(session)
-
-    # --- 处理等待下一个玩家的动作 ---
-    if game_state.get('stop_type') == 'wait_for_next_player':
-        # 确定下一个玩家（逆时针：North → West → South → East）
-        next_player_index = len(current_trick)
-        if next_player_index == 0:
-            # North已经出牌，现在轮到West
-            next_player = 'west'
-        elif next_player_index == 1:
-            # West已经出牌，现在轮到South
-            next_player = 'south'
-        elif next_player_index == 2:
-            # South已经出牌，现在轮到East
-            next_player = 'east'
-        else:
-            # 四家都出牌了，处理完这一墩
-            winner = determine_trick_winner(current_trick, trump_suit)
-            # 更新分数
-            if winner in ['south', 'north']:
-                game_state['scores']['south_north'] += 1
-            else:
-                game_state['scores']['east_west'] += 1
-
-            # 保存此墩
-            trick_dict = {}
-            for player, card in current_trick:
-                trick_dict[player] = card
-            game_state['tricks'].append(trick_dict)
-            game_state['current_trick'] = []
-            game_state['leader'] = winner
-            game_state['trick_number'] = len(game_state['tricks']) + 1
-
-            # 检查游戏是否结束
-            if len(game_state['tricks']) == 13:
-                sn_score = game_state['scores']['south_north']
-                ew_score = game_state['scores']['east_west']
-                if sn_score >= 7:
-                    game_state['message'] = f"South-North wins the game! Final score: {sn_score}-{ew_score}"
-                else:
-                    game_state['message'] = f"East-West wins the game! Final score: {ew_score}-{sn_score}"
-                game_state['stop_type'] = 'game_over'
-            else:
-                game_state['message'] = f"{winner.capitalize()} wins the trick! They will lead the next one."
-                game_state['stop_type'] = 'new_trick'
-            
-            session['game_state'] = game_state
-            return game_state
+        game_state['current_trick'] = []
+        game_state['leader'] = 'north'
+        game_state['message'] = "New trick started. North leads."
+        game_state['trick_history'] = []
         
-        # 如果是AI玩家的回合，自动出牌
-        if next_player != 'south':
-            # AI出牌
-            ai_card = ai_play_card(next_player, hands[next_player], current_trick, trump_suit, game_state)
-            hands[next_player].remove(ai_card)
-            hands[next_player] = sort_hand(hands[next_player])
-            
-            # 添加到当前墩
-            current_trick.append((next_player, ai_card))
-            game_state['current_trick'] = current_trick
-            
-            # 更新出牌历史
-            display_name = get_card_display_name(ai_card)
-            # 确定显示位置
-            position_map = {'north': 0, 'west': 1, 'south': 2, 'east': 3}
-            game_state['trick_history'].append({
-                'player': next_player,
-                'card': ai_card,
-                'display_position': position_map[next_player],
-                'display_name': display_name
-            })
-            
-            game_state['message'] = f"{next_player.capitalize()} played {display_name}."
-            
-            # 如果还有玩家需要出牌，继续等待
-            if len(current_trick) < 4:
-                game_state['stop_type'] = 'wait_for_next_player'
-            else:
-                game_state['stop_type'] = 'process_trick'
-                
-            # 更新手牌
-            game_state['hands'] = {
-                'north': hands['north'],
-                'east': hands['east'],
-                'south': hands['south'],
-                'west': hands['west']
-            }
-            
-            session['game_state'] = game_state
-            return game_state
+        # ====== 执行North出牌 ======
+        north_card = ai_play_card('north', hands['north'], [], trump_suit, game_state)
+        hands['north'].remove(north_card)
+        hands['north'] = sort_hand(hands['north'])
         
-        # 如果是人类玩家的回合
-        else:
-            game_state['stop_type'] = 'follow_card'
-            game_state['message'] = "Your turn to follow suit."
-            session['game_state'] = game_state
-            return game_state
+        current_trick = [('north', north_card)]
+        game_state['current_trick'] = current_trick
+        
+        # 记录North出牌
+        display_name = get_card_display_name(north_card)
+        game_state['trick_history'] = [{
+            'player': 'north',
+            'card': north_card,
+            'display_position': 0,
+            'display_name': display_name
+        }]
+        
+        game_state['message'] = f"North played {display_name}."
+        
+        # ====== 关键修复：立即执行West出牌 ======
+        west_card = ai_play_card('west', hands['west'], current_trick, trump_suit, game_state)
+        hands['west'].remove(west_card)
+        hands['west'] = sort_hand(hands['west'])
+        
+        current_trick.append(('west', west_card))
+        game_state['current_trick'] = current_trick
+        
+        # 记录West出牌
+        west_display = get_card_display_name(west_card)
+        game_state['trick_history'].append({
+            'player': 'west',
+            'card': west_card,
+            'display_position': 1,
+            'display_name': west_display
+        })
+        
+        game_state['message'] = f"West played {west_display}."
+        
+        # 现在轮到South出牌
+        game_state['stop_type'] = 'follow_card'
+        
+        # 更新手牌
+        game_state['hands'] = {
+            'north': hands['north'],
+            'east': hands['east'],
+            'south': hands['south'],
+            'west': hands['west']
+        }
+        
+        session['game_state'] = game_state
+        return game_state
 
     # --- 人类玩家出牌 ---
     if action and isinstance(action, str) and action.startswith('play_'):
@@ -424,6 +331,23 @@ def game_update(session, action):
         
         game_state['message'] = f"You played {display_name}."
 
+        # ====== East自动出牌 ======
+        east_card = ai_play_card('east', hands['east'], current_trick, trump_suit, game_state)
+        hands['east'].remove(east_card)
+        hands['east'] = sort_hand(hands['east'])
+        current_trick.append(('east', east_card))
+        
+        # 记录East出牌
+        east_display = get_card_display_name(east_card)
+        game_state['trick_history'].append({
+            'player': 'east',
+            'card': east_card,
+            'display_position': 3,
+            'display_name': east_display
+        })
+        
+        game_state['message'] = f"East played {east_display}."
+
         # 检查是否完成一墩
         if len(current_trick) == 4:
             winner = determine_trick_winner(current_trick, trump_suit)
@@ -454,11 +378,6 @@ def game_update(session, action):
             else:
                 game_state['message'] = f"{winner.capitalize()} wins the trick! They will lead the next one."
                 game_state['stop_type'] = 'new_trick'
-        else:
-            # 墩未完成，继续
-            game_state['stop_type'] = 'wait_for_next_player'
-            # 下一个玩家是East
-            game_state['message'] = "Waiting for East to play..."
 
         # 更新手牌
         game_state['hands'] = {
