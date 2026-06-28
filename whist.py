@@ -124,7 +124,7 @@ def new_game(session):
         'north': deck[0:13],    # 第1-13张
         'east': deck[13:26],    # 第14-26张
         'south': deck[26:39],   # 第27-39张
-        'west': deck[39:52]     # 第40-52张 ← 最后一张在这里
+        'west': deck[39:52]     # 第40-52张
     }
 
     # ====== 关键：最后一张牌（索引51，第52张）发给西家 ======
@@ -149,9 +149,6 @@ def new_game(session):
         'west': 'West (AI)'
     }
     
-    # 当前墩的显示（初始为空）
-    current_trick_display = {}
-    
     # 游戏开始消息（显示王牌花色）
     suit_names = {'S': 'Spades', 'H': 'Hearts', 'D': 'Diamonds', 'C': 'Clubs'}
     game_message = f"Trump suit is {suit_names.get(trump_suit, trump_suit)}! Ready for a new trick!"
@@ -165,13 +162,14 @@ def new_game(session):
         'tricks': [],  # 已完成的墩列表
         'current_trick': [],  # 当前正在打的墩（出牌列表）
         'leader': 'north',  # 首攻者是北家
+        'players': players,  # 玩家显示名称
         
         # ====== 前端模板需要的数据 ======
-        'players': players,  # 玩家显示名称
         'trump_suit_name': trump_info['svg'],  # 用于加载正确的SVG文件
         'message': game_message,  # 显示王牌花色
         'message_class': "info-message",
         'stop_type': 'new_trick',  # 让按钮显示"New Trick"
+        'trick_number': 1,  # 当前第几墩
     }
 
     session['game_state'] = game_state
@@ -190,6 +188,17 @@ def game_update(session, action):
     trump_suit = game_state['trump_suit']
     leader = game_state['leader']
 
+    # --- 处理"New Trick"动作 ---
+    if action == 'new_trick':
+        # 重置当前墩
+        game_state['current_trick'] = []
+        game_state['leader'] = 'north'  # 北家首攻
+        game_state['message'] = "New trick started. North leads."
+        game_state['stop_type'] = 'lead_card'  # 北家需要出牌
+        session['game_state'] = game_state
+        return game_state
+
+    # --- 处理玩家出牌动作 ---
     # 确定轮到谁出牌
     next_player_index = len(current_trick)
     next_player = players[(players.index(leader) + next_player_index) % 4]
@@ -209,6 +218,7 @@ def game_update(session, action):
         # 从手牌中移除这张牌并加入当前墩
         hands['south'].remove(played_card)
         current_trick.append(('south', played_card))
+        game_state['message'] = f"You played {played_card}."
 
     # --- AI玩家 ---
     else:
@@ -235,6 +245,7 @@ def game_update(session, action):
         game_state['tricks'].append(trick_dict)
         game_state['current_trick'] = []
         game_state['leader'] = winner  # 赢家领出下一墩
+        game_state['trick_number'] = len(game_state['tricks']) + 1
 
         # 检查游戏是否结束
         if len(game_state['tricks']) == 13:
@@ -248,7 +259,6 @@ def game_update(session, action):
         else:
             game_state['message'] = f"{winner.capitalize()} wins the trick! They will lead the next one."
             game_state['stop_type'] = 'new_trick'
-
     else:
         # 墩未完成，继续
         game_state['current_trick'] = current_trick
@@ -257,7 +267,11 @@ def game_update(session, action):
         if next_next_player == 'south':
             game_state['stop_type'] = 'follow_card' if current_trick else 'lead_card'
         else:
+            # AI玩家需要自动出牌 - 递归调用game_update
+            # 这是关键修复：让AI自动出牌，而不是等待用户点击
             game_state['stop_type'] = 'proceed'
+            # 递归调用game_update处理下一个AI玩家的出牌
+            return game_update(session, None)
 
     # 更新手牌
     game_state['hands'] = {
