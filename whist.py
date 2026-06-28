@@ -399,7 +399,7 @@ def game_update(session, action):
         played_card = action.replace('play_', '')
         
         # 验证出牌是否合法
-        lead_suit = get_suit(game_state['current_trick'][0][1']) if game_state['current_trick'] else None
+        lead_suit = get_suit(game_state['current_trick'][0][1]) if game_state['current_trick'] else None
         valid_cards = find_valid_cards(hands['south'], lead_suit)
         if played_card not in valid_cards:
             game_state['message'] = "Invalid move! You must follow suit."
