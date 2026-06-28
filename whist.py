@@ -1,22 +1,32 @@
 from playcard import *
 import random
+import json
 
+# ====== 调试工具函数 ======
+def debug_log(message, state=None):
+    """用于调试，可以在日志中查看状态"""
+    print(f"[DEBUG] {message}")
+    if state:
+        # 只打印关键字段，避免太长
+        debug_state = {
+            'stop_type': state.get('stop_type'),
+            'current_trick_len': len(state.get('current_trick', [])),
+            'trick_history_len': len(state.get('trick_history', [])),
+            'hands_south_len': len(state['hands']['south']) if state.get('hands') else 0,
+            'message': state.get('message', '')
+        }
+        print(f"  State: {json.dumps(debug_state, indent=2)}")
 
 def find_valid_cards(hand, lead_suit):
-    """找出手中所有符合'跟花色'规则的牌。"""
-    if lead_suit is None:  # 首攻，可以出任意牌
+    if lead_suit is None:
         return hand[:]
     return [card for card in hand if get_suit(card) == lead_suit]
 
-
 def sort_hand(hand):
-    """对一手牌进行排序：先按花色(♣, ♢, ♡, ♠)，再按点数(A, K, Q, J, 10...)"""
     suit_order = {'C': 0, 'D': 1, 'H': 2, 'S': 3}
     return sorted(hand, key=lambda card: (suit_order[get_suit(card)], -get_rank_ace_high(card)))
 
-
 def get_card_display_name(card):
-    """将内部牌表示转换为人类可读的名称"""
     rank = str(get_rank_ace_high(card))
     suit = get_suit(card)
     
@@ -26,7 +36,6 @@ def get_card_display_name(card):
     rank_name = rank_names.get(rank, rank)
     suit_name = suit_names.get(suit, suit)
     return f"{rank_name} of {suit_name}"
-
 
 def find_highest_card(cards, trump_suit=None, lead_suit=None):
     if not cards:
@@ -41,31 +50,26 @@ def find_highest_card(cards, trump_suit=None, lead_suit=None):
             return max(same_suit, key=get_rank_ace_high)
     return max(cards, key=get_rank_ace_high)
 
-
-def determine_trick_winner(trick, trump_suit, leader_index=0):
-    """修正版：确保trick格式正确"""
+def determine_trick_winner(trick, trump_suit):
+    """简化版：确保输入是[(player, card), ...]格式"""
     if not trick:
         return 'north'
     
-    # 确保trick是[(player, card), ...]格式
+    # 确保格式统一
     if isinstance(trick[0], dict):
-        # 如果是字典格式，转换为元组格式
-        trick_tuples = [(item['player'], item['card']) for item in trick]
-    else:
-        trick_tuples = trick
+        trick = [(item['player'], item['card']) for item in trick]
     
-    lead_suit = get_suit(trick_tuples[leader_index][1])
-    winning_card = find_highest_card([c for _, c in trick_tuples], trump_suit, lead_suit)
-    for player, card in trick_tuples:
+    lead_suit = get_suit(trick[0][1])
+    winning_card = find_highest_card([c for _, c in trick], trump_suit, lead_suit)
+    for player, card in trick:
         if card == winning_card:
             return player
-    return trick_tuples[0][0]
-
+    return trick[0][0]
 
 def ai_play_card(player, hand, current_trick, trump_suit, game_state):
+    # 处理current_trick格式
     lead_suit = None
     if current_trick:
-        # 修正：处理current_trick可能是字典列表的情况
         if isinstance(current_trick[0], dict):
             lead_suit = get_suit(current_trick[0]['card'])
         else:
@@ -76,12 +80,9 @@ def ai_play_card(player, hand, current_trick, trump_suit, game_state):
     if lead_suit is not None and valid_cards != hand:
         same_suit_cards = []
         for item in current_trick:
-            if isinstance(item, dict):
-                if get_suit(item['card']) == lead_suit:
-                    same_suit_cards.append(item['card'])
-            else:
-                if get_suit(item[1]) == lead_suit:
-                    same_suit_cards.append(item[1])
+            card = item['card'] if isinstance(item, dict) else item[1]
+            if get_suit(card) == lead_suit:
+                same_suit_cards.append(card)
         
         highest_in_suit = max(same_suit_cards, key=get_rank_ace_high) if same_suit_cards else None
         
@@ -91,6 +92,7 @@ def ai_play_card(player, hand, current_trick, trump_suit, game_state):
                 return min(winning_cards, key=get_rank_ace_high)
         return min(valid_cards, key=get_rank_ace_high)
 
+    # 清短套策略
     suit_counts = {}
     for card in hand:
         s = get_suit(card)
@@ -159,7 +161,7 @@ def new_game(session):
         'trump_card': trump_card,
         'scores': {'south_north': 0, 'east_west': 0},
         'tricks': [],
-        'current_trick': [],  # 使用列表存储当前墩
+        'current_trick': [],  # 始终保持为列表格式
         'leader': 'north',
         'players': players,
         'trump_suit_name': trump_info['svg'],
@@ -167,16 +169,19 @@ def new_game(session):
         'message_class': "info-message",
         'stop_type': 'new_trick',
         'trick_number': 1,
-        'trick_history': []  # 存储完整的出牌历史
+        'trick_history': []
     }
 
     session['game_state'] = game_state
+    debug_log("New game initialized", game_state)
     return game_state
 
 
 def game_update(session, action):
+    """终极修复版：使用明确的状态转换"""
     game_state = session.get('game_state')
     if not game_state:
+        debug_log("No game state found, creating new game")
         return new_game(session)
 
     hands = game_state['hands']
@@ -184,59 +189,44 @@ def game_update(session, action):
     current_trick = game_state.get('current_trick', [])
     trick_history = game_state.get('trick_history', [])
     
-    # ====== 关键修复：统一数据结构 ======
-    # 确保current_trick是[(player, card), ...]格式
-    if current_trick and isinstance(current_trick[0], dict):
-        current_trick = [(item['player'], item['card']) for item in current_trick]
-        game_state['current_trick'] = current_trick
+    debug_log(f"game_update called with action: {action}", game_state)
 
-    # --- 处理新墩开始 ---
-    if action == 'new_trick':
+    # ====== 状态机：明确的四个阶段 ======
+    # 1. NEW_TRICK: North出牌 → West出牌 → 进入FOLLOW_CARD
+    # 2. FOLLOW_CARD: South出牌 → East出牌 → 判定赢家 → 进入NEXT_TRICK或GAME_OVER
+    # 3. NEXT_TRICK: 准备下一墩
+    # 4. GAME_OVER: 游戏结束
+
+    # --- 阶段1: 新墩开始 ---
+    if game_state.get('stop_type') == 'new_trick':
+        debug_log("Entering NEW_TRICK phase")
+        
+        # 初始化当前墩
         game_state['current_trick'] = []
-        game_state['leader'] = 'north'
-        game_state['message'] = "New trick started. North leads."
         game_state['trick_history'] = []
+        game_state['message'] = "New trick started. North leads."
         
         # North出牌
         north_card = ai_play_card('north', hands['north'], [], trump_suit, game_state)
         hands['north'].remove(north_card)
         hands['north'] = sort_hand(hands['north'])
         
-        # 更新current_trick为元组格式
-        current_trick = [('north', north_card)]
-        game_state['current_trick'] = current_trick
-        
-        # 记录North出牌到trick_history
+        game_state['current_trick'] = [('north', north_card)]
         north_display = get_card_display_name(north_card)
-        game_state['trick_history'] = [{
-            'player': 'north',
-            'card': north_card,
-            'display_position': 0,
-            'display_name': north_display
-        }]
-        
+        game_state['trick_history'] = [{'player': 'north', 'card': north_card, 'display_position': 0, 'display_name': north_display}]
         game_state['message'] = f"North played {north_display}."
         
         # West出牌
-        west_card = ai_play_card('west', hands['west'], current_trick, trump_suit, game_state)
+        west_card = ai_play_card('west', hands['west'], game_state['current_trick'], trump_suit, game_state)
         hands['west'].remove(west_card)
         hands['west'] = sort_hand(hands['west'])
         
-        current_trick.append(('west', west_card))
-        game_state['current_trick'] = current_trick
-        
-        # 记录West出牌
+        game_state['current_trick'].append(('west', west_card))
         west_display = get_card_display_name(west_card)
-        game_state['trick_history'].append({
-            'player': 'west',
-            'card': west_card,
-            'display_position': 1,
-            'display_name': west_display
-        })
-        
+        game_state['trick_history'].append({'player': 'west', 'card': west_card, 'display_position': 1, 'display_name': west_display})
         game_state['message'] = f"West played {west_display}."
         
-        # 现在轮到South出牌
+        # 设置为等待South出牌
         game_state['stop_type'] = 'follow_card'
         
         # 更新手牌
@@ -248,16 +238,28 @@ def game_update(session, action):
         }
         
         session['game_state'] = game_state
+        debug_log("NEW_TRICK phase completed, now in FOLLOW_CARD", game_state)
         return game_state
 
-    # --- 人类玩家出牌 ---
+    # --- 阶段2: 人类玩家出牌（South）---
     if action and isinstance(action, str) and action.startswith('play_'):
+        debug_log("Processing South's play action")
+        
         played_card = action.replace('play_', '')
         
-        # 验证出牌合法性
-        lead_suit = get_suit(game_state['current_trick'][0][1]) if game_state['current_trick'] else None
+        # 验证合法性
+        if not game_state['current_trick']:
+            debug_log("Error: current_trick is empty!")
+            game_state['message'] = "Game error: no current trick."
+            game_state['message_class'] = "error-message"
+            session['game_state'] = game_state
+            return game_state
+            
+        lead_suit = get_suit(game_state['current_trick'][0][1])
         valid_cards = find_valid_cards(hands['south'], lead_suit)
+        
         if played_card not in valid_cards:
+            debug_log(f"Invalid move: {played_card} not in valid cards {valid_cards}")
             game_state['message'] = "Invalid move! You must follow suit."
             game_state['message_class'] = "error-message"
             session['game_state'] = game_state
@@ -266,10 +268,8 @@ def game_update(session, action):
         # South出牌
         hands['south'].remove(played_card)
         hands['south'] = sort_hand(hands['south'])
-        current_trick.append(('south', played_card))
-        game_state['current_trick'] = current_trick
+        game_state['current_trick'].append(('south', played_card))
         
-        # 记录South出牌
         south_display = get_card_display_name(played_card)
         game_state['trick_history'].append({
             'player': 'south',
@@ -277,16 +277,16 @@ def game_update(session, action):
             'display_position': 2,
             'display_name': south_display
         })
-        
         game_state['message'] = f"You played {south_display}."
-
-        # ====== East自动出牌 ======
-        east_card = ai_play_card('east', hands['east'], current_trick, trump_suit, game_state)
+        
+        # ====== 关键：立即执行East出牌，不等待用户 ======
+        debug_log("Executing East's automatic play")
+        
+        east_card = ai_play_card('east', hands['east'], game_state['current_trick'], trump_suit, game_state)
         hands['east'].remove(east_card)
         hands['east'] = sort_hand(hands['east'])
-        current_trick.append(('east', east_card))
+        game_state['current_trick'].append(('east', east_card))
         
-        # 记录East出牌
         east_display = get_card_display_name(east_card)
         game_state['trick_history'].append({
             'player': 'east',
@@ -294,13 +294,14 @@ def game_update(session, action):
             'display_position': 3,
             'display_name': east_display
         })
-        
         game_state['message'] = f"East played {east_display}."
-
-        # 检查是否完成一墩（4张牌）
-        if len(current_trick) == 4:
+        
+        # 检查是否完成一墩（必须有4张牌）
+        if len(game_state['current_trick']) == 4:
+            debug_log("Trick complete, determining winner")
+            
             # 判定赢家
-            winner = determine_trick_winner(current_trick, trump_suit)
+            winner = determine_trick_winner(game_state['current_trick'], trump_suit)
             
             # 更新分数
             if winner in ['south', 'north']:
@@ -310,9 +311,11 @@ def game_update(session, action):
 
             # 保存此墩
             trick_dict = {}
-            for player, card in current_trick:
+            for player, card in game_state['current_trick']:
                 trick_dict[player] = card
             game_state['tricks'].append(trick_dict)
+            
+            # 重置当前墩
             game_state['current_trick'] = []
             game_state['leader'] = winner
             game_state['trick_number'] = len(game_state['tricks']) + 1
@@ -328,7 +331,7 @@ def game_update(session, action):
                 game_state['stop_type'] = 'game_over'
             else:
                 game_state['message'] = f"{winner.capitalize()} wins the trick! They will lead the next one."
-                game_state['stop_type'] = 'new_trick'
+                game_state['stop_type'] = 'new_trick'  # 下一墩开始
 
         # 更新手牌
         game_state['hands'] = {
@@ -339,7 +342,9 @@ def game_update(session, action):
         }
         
         session['game_state'] = game_state
+        debug_log("South play processed successfully", game_state)
         return game_state
 
-    # 默认返回
+    # --- 默认情况：返回当前状态 ---
+    debug_log("Returning current state without changes")
     return game_state
