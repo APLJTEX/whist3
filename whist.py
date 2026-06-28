@@ -274,15 +274,27 @@ def game_update(session, action):
             current_trick.append((next_player, ai_card))
             game_state['current_trick'] = current_trick
             
-            # ====== 关键修正：更新出牌历史 ======
+            # ====== 关键修正：使用正确的显示位置映射 ======
+            # 定义玩家到显示位置的映射
+            player_to_position = {
+                'north': 0,  # 顶部
+                'west': 1,   # 左侧
+                'south': 2,  # 底部
+                'east': 3    # 右侧
+            }
+            
+            # 获取正确的显示位置
+            display_position = player_to_position[next_player]
+            
+            # 更新出牌历史
             game_state['trick_history'].append({
                 'player': next_player,
                 'card': ai_card,
-                'position': next_player_index,
-                'display_name': get_card_display_name(ai_card)  # 使用可读名称
+                'display_position': display_position,  # 使用正确的显示位置
+                'display_name': get_card_display_name(ai_card)
             })
             
-            # ====== 关键修正：显示人类可读的出牌信息 ======
+            # 显示人类可读的出牌信息
             display_name = get_card_display_name(ai_card)
             game_state['message'] = f"{next_player.capitalize()} played {display_name}."
             
@@ -360,12 +372,24 @@ def game_update(session, action):
         current_trick.append(('south', played_card))
         game_state['current_trick'] = current_trick
         
-        # ====== 关键修正：更新出牌历史 ======
+        # ====== 关键修正：使用正确的显示位置映射 ======
+        # 定义玩家到显示位置的映射
+        player_to_position = {
+            'north': 0,  # 顶部
+            'west': 1,   # 左侧
+            'south': 2,  # 底部
+            'east': 3    # 右侧
+        }
+        
+        # 获取正确的显示位置
+        display_position = player_to_position['south']
+        
+        # 更新出牌历史
         display_name = get_card_display_name(played_card)
         game_state['trick_history'].append({
             'player': 'south',
             'card': played_card,
-            'position': len(current_trick) - 1,
+            'display_position': display_position,  # 使用正确的显示位置
             'display_name': display_name
         })
         
