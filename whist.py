@@ -9,6 +9,18 @@ def find_valid_cards(hand, lead_suit):
     return [card for card in hand if get_suit(card) == lead_suit]
 
 
+def sort_hand(hand):
+    """对一手牌进行排序：先按花色(♣, ♢, ♡, ♠)，再按点数(A, K, Q, J, 10...)"""
+    # 定义花色和点数的排序优先级
+    suit_order = {'C': 0, 'D': 1, 'H': 2, 'S': 3}  # Clubs, Diamonds, Hearts, Spades
+    rank_order = {'A': 14, 'K': 13, 'Q': 12, 'J': 11, '10': 10, '9': 9, '8': 8, '7': 7, 
+                 '6': 6, '5': 5, '4': 4, '3': 3, '2': 2}
+    
+    # 按花色和点数排序
+    return sorted(hand, key=lambda card: (suit_order[get_suit(card)], 
+                                        rank_order[get_rank_ace_high(card)]))
+
+
 def find_highest_card(cards, trump_suit=None, lead_suit=None):
     """
     找出一组牌中的最高牌。
@@ -153,9 +165,17 @@ def new_game(session):
     suit_names = {'S': 'Spades', 'H': 'Hearts', 'D': 'Diamonds', 'C': 'Clubs'}
     game_message = f"Trump suit is {suit_names.get(trump_suit, trump_suit)}! Ready for a new trick!"
 
+    # 对手牌进行排序
+    sorted_hands = {
+        'north': sort_hand(hands['north']),
+        'east': sort_hand(hands['east']),
+        'south': sort_hand(hands['south']),
+        'west': sort_hand(hands['west'])
+    }
+
     game_state = {
         # ====== 标准游戏状态 ======
-        'hands': hands,
+        'hands': sorted_hands,  # 使用排序后的手牌
         'trump_suit': trump_suit,  # 王牌花色代码
         'trump_card': trump_card,  # 王牌牌面（用于显示）
         'scores': {'south_north': 0, 'east_west': 0},
@@ -217,6 +237,8 @@ def game_update(session, action):
 
         # 从手牌中移除这张牌并加入当前墩
         hands['south'].remove(played_card)
+        # 对剩余手牌重新排序
+        hands['south'] = sort_hand(hands['south'])
         current_trick.append(('south', played_card))
         game_state['message'] = f"You played {played_card}."
 
@@ -224,6 +246,8 @@ def game_update(session, action):
     else:
         ai_card = ai_play_card(next_player, hands[next_player], current_trick, trump_suit, game_state)
         hands[next_player].remove(ai_card)
+        # 对剩余手牌重新排序
+        hands[next_player] = sort_hand(hands[next_player])
         current_trick.append((next_player, ai_card))
         game_state['message'] = f"{next_player.capitalize()} played {ai_card}."
 
@@ -268,7 +292,6 @@ def game_update(session, action):
             game_state['stop_type'] = 'follow_card' if current_trick else 'lead_card'
         else:
             # AI玩家需要自动出牌 - 递归调用game_update
-            # 这是关键修复：让AI自动出牌，而不是等待用户点击
             game_state['stop_type'] = 'proceed'
             # 递归调用game_update处理下一个AI玩家的出牌
             return game_update(session, None)
