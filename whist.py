@@ -117,23 +117,20 @@ def new_game(session):
     deck = make_deck()
     random.shuffle(deck)
 
-    # ====== 修正：按顺时针顺序发牌，确保最后一张给东家 ======
+    # ====== 修正：按顺时针顺序发牌，确保最后一张给西家 ======
     # 发牌顺序：北 → 东 → 南 → 西 （顺时针）
     # 每人13张，共52张
     hands = {
         'north': deck[0:13],    # 第1-13张
         'east': deck[13:26],    # 第14-26张
         'south': deck[26:39],   # 第27-39张
-        'west': deck[39:52]     # 第40-52张
+        'west': deck[39:52]     # 第40-52张 ← 最后一张在这里
     }
 
     # ====== 关键：最后一张牌（索引51，第52张）发给西家 ======
     # 根据规则，这张牌翻开作为王牌
     trump_card = deck[51]  # 最后一张牌
     trump_suit = get_suit(trump_card)  # 王牌花色
-    
-    # 显示王牌信息（用于调试和确认）
-    print(f"王牌花色确定: {trump_suit} (来自牌: {trump_card})")
     
     # 王牌花色映射到SVG文件名和显示名称
     trump_svg_map = {
@@ -144,21 +141,16 @@ def new_game(session):
     }
     trump_info = trump_svg_map.get(trump_suit, trump_svg_map['S'])
     
-    # 为前端模板准备辅助数据
-    player_positions = {
-        'north': {'display_name': 'North (AI)', 'card_count': 13, 'is_human': False},
-        'east': {'display_name': 'East (AI)', 'card_count': 13, 'is_human': False},
-        'south': {'display_name': 'South (You)', 'card_count': 13, 'is_human': True},
-        'west': {'display_name': 'West (AI)', 'card_count': 13, 'is_human': False}
+    # 玩家显示名称
+    players = {
+        'north': 'North (AI)',
+        'east': 'East (AI)',
+        'south': 'South (You)',
+        'west': 'West (AI)'
     }
     
-    # 按钮配置
-    button_config = {
-        'text': 'New Trick',
-        'id': 'proceed-btn',
-        'class': 'proceed-btn',
-        'disabled': False
-    }
+    # 当前墩的显示（初始为空）
+    current_trick_display = {}
     
     # 游戏开始消息（显示王牌花色）
     suit_names = {'S': 'Spades', 'H': 'Hearts', 'D': 'Diamonds', 'C': 'Clubs'}
@@ -170,25 +162,16 @@ def new_game(session):
         'trump_suit': trump_suit,  # 王牌花色代码
         'trump_card': trump_card,  # 王牌牌面（用于显示）
         'scores': {'south_north': 0, 'east_west': 0},
-        'tricks': [],  # 已完成的墩
-        'current_trick': [],  # 当前正在打的墩
+        'tricks': [],  # 已完成的墩列表
+        'current_trick': [],  # 当前正在打的墩（出牌列表）
         'leader': 'north',  # 首攻者是北家
         
-        # ====== 前端渲染辅助数据 ======
-        'trump_svg_name': trump_info['svg'],  # 用于加载正确的SVG文件
-        'trump_suit_name': trump_info['name'],  # 王牌花色名称
-        'trump_suit_symbol': trump_info['symbol'],  # 王牌花色符号
-        'player_positions': player_positions,  # 玩家位置信息
-        'button_config': button_config,  # 按钮配置
-        
-        # ====== 消息和状态 ======
+        # ====== 前端模板需要的数据 ======
+        'players': players,  # 玩家显示名称
+        'trump_suit_name': trump_info['svg'],  # 用于加载正确的SVG文件
         'message': game_message,  # 显示王牌花色
         'message_class': "info-message",
         'stop_type': 'new_trick',  # 让按钮显示"New Trick"
-        
-        # ====== 游戏进度 ======
-        'trick_number': 1,  # 当前第几墩
-        'total_tricks': 13,  # 总共13墩
     }
 
     session['game_state'] = game_state
@@ -221,7 +204,7 @@ def game_update(session, action):
             game_state['message'] = "Invalid move! You must follow suit."
             game_state['message_class'] = "error-message"
             session['game_state'] = game_state
-            return
+            return game_state
 
         # 从手牌中移除这张牌并加入当前墩
         hands['south'].remove(played_card)
@@ -244,12 +227,14 @@ def game_update(session, action):
             game_state['scores']['east_west'] += 1
 
         # 保存此墩，并重置下一墩
-        game_state['tricks'].append(current_trick)
+        # 将当前墩转换为字典格式，供模板显示
+        trick_dict = {}
+        for player, card in current_trick:
+            trick_dict[player] = card
+        
+        game_state['tricks'].append(trick_dict)
         game_state['current_trick'] = []
         game_state['leader'] = winner  # 赢家领出下一墩
-        
-        # 更新墩号
-        game_state['trick_number'] = len(game_state['tricks']) + 1
 
         # 检查游戏是否结束
         if len(game_state['tricks']) == 13:
@@ -260,25 +245,9 @@ def game_update(session, action):
             else:
                 game_state['message'] = f"East-West wins the game! Final score: {ew_score}-{sn_score}"
             game_state['stop_type'] = 'game_over'
-            
-            # 更新按钮
-            game_state['button_config'] = {
-                'text': 'New Game',
-                'id': 'proceed-btn',
-                'class': 'proceed-btn',
-                'disabled': False
-            }
         else:
             game_state['message'] = f"{winner.capitalize()} wins the trick! They will lead the next one."
             game_state['stop_type'] = 'new_trick'
-            
-            # 更新按钮
-            game_state['button_config'] = {
-                'text': 'New Trick',
-                'id': 'proceed-btn',
-                'class': 'proceed-btn',
-                'disabled': False
-            }
 
     else:
         # 墩未完成，继续
@@ -287,33 +256,16 @@ def game_update(session, action):
         next_next_player = players[(players.index(next_player) + 1) % 4]
         if next_next_player == 'south':
             game_state['stop_type'] = 'follow_card' if current_trick else 'lead_card'
-            game_state['button_config'] = {
-                'text': 'Proceed',
-                'id': 'proceed-btn',
-                'class': 'proceed-btn',
-                'disabled': True
-            }
         else:
-            game_state['button_config'] = {
-                'text': 'Proceed',
-                'id': 'proceed-btn',
-                'class': 'proceed-btn',
-                'disabled': False
-            }
+            game_state['stop_type'] = 'proceed'
 
-    # 更新手牌数量
+    # 更新手牌
     game_state['hands'] = {
         'north': hands['north'],
         'east': hands['east'],
         'south': hands['south'],
         'west': hands['west']
     }
-    
-    # 更新玩家位置信息（手牌数量）
-    game_state['player_positions']['north']['card_count'] = len(hands['north'])
-    game_state['player_positions']['east']['card_count'] = len(hands['east'])
-    game_state['player_positions']['south']['card_count'] = len(hands['south'])
-    game_state['player_positions']['west']['card_count'] = len(hands['west'])
 
     session['game_state'] = game_state
     return game_state
